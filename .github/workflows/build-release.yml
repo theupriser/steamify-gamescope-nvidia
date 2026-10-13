@@ -33,6 +33,12 @@ jobs:
           runuser -u builder -- bash -c 'cd ~/pkg && makepkg -sf --noconfirm --nocheck'
           cd /home/builder/pkg
           pkg=$(ls steamify-gamescope-nvidia-*.pkg.tar.zst | grep -v -- '-debug-' | head -1)
+          # The package must really contain both patches and start: a build that silently lacks a patch is not published.
+          bsdtar -xOf "$pkg" usr/bin/gamescope > /tmp/gamescope-check
+          chmod +x /tmp/gamescope-check
+          strings -a /tmp/gamescope-check | grep -q drm_gbm_scanout || { echo "the GBM scan-out patch is missing from the binary" >&2; exit 1; }
+          strings -a /tmp/gamescope-check | grep -q xwayland_ui_native || { echo "the UI-native patch is missing from the binary" >&2; exit 1; }
+          /tmp/gamescope-check --version 2>&1 | head -2
           sha256sum "$pkg" > "$pkg.sha256"
           cat "$pkg.sha256"
           tag=${pkg#steamify-gamescope-nvidia-}; tag=${tag%-x86_64.pkg.tar.zst}
