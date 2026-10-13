@@ -16,6 +16,10 @@ Its author noted that part of that work was AI-assisted. gamescope is BSD-2-Clau
 
 It is opt-in: it only takes effect with `gamescope_drm_gbm_scanout=1` in gamescope's environment (Steamify sets it).
 
+A second, small patch of ours (`gamescope-ui-native.patch`) keeps Steam's UI X server at the display's size: with `-steamos3`,
+which `gamescope-session-cachyos` passes, Steam otherwise sets its interface to 1920x1080, a scaled-up picture on bigger or
+non-16:9 displays. It is on by default; `gamescope_xwayland_ui_native=0` in gamescope's environment turns it off.
+
 ## Supported cards
 
 NVIDIA GTX 16 / RTX 20-series or newer (Turing and later). That is what NVIDIA's open kernel driver supports.
@@ -23,8 +27,9 @@ Older cards (GTX 10 series and below) run NVIDIA's closed driver and are not cov
 
 ## Tested
 
-RTX 5080, driver 615.78.08, gamescope 3.16.31, 3440x1440@175 over DisplayPort: Steam's gaming UI is clean with the patch
-and shows artifacts everywhere without it. Real games are not tested yet.
+RTX 5080, driver 615.78.08, gamescope 3.16.31, 3440x1440@175 over DisplayPort: Steam's gaming UI is clean with the first patch
+and shows artifacts everywhere without it; with the second, the UI is widescreen and sharp and a Proton game (Stronghold Crusader
+Definitive Edition) starts and runs at native resolution.
 
 ## Build and install (Arch, CachyOS)
 
