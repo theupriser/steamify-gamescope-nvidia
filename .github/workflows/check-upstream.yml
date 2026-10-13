@@ -1,0 +1,69 @@
+# DRAFT, not run yet. Daily: is there a new gamescope release, and does the GBM patch still apply to it?
+#  - applies cleanly  -> a pull request bumps UPSTREAM_VERSION (and the PKGBUILD's pkgver)
+#  - does not apply   -> Claude rebases the patch onto the new version and opens a pull request
+# Nothing is merged or released without a person reviewing the pull request.
+# Needs: the secret ANTHROPIC_API_KEY (only for the rebase job) and "Allow GitHub Actions to create pull requests".
+name: check-upstream
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      latest: ${{ steps.check.outputs.latest }}
+      newer: ${{ steps.check.outputs.newer }}
+      applies: ${{ steps.check.outputs.applies }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: bash scripts/check-upstream.sh
+
+  bump:
+    needs: check
+    if: needs.check.outputs.newer == 'yes' && needs.check.outputs.applies == 'yes'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bump the version
+        env:
+          LATEST: ${{ needs.check.outputs.latest }}
+        run: |
+          echo "$LATEST" > UPSTREAM_VERSION
+          sed -i "s/^pkgver=.*/pkgver=$LATEST/; s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+      - name: Open the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ needs.check.outputs.latest }}
+        run: |
+          branch="bump-$LATEST"
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git checkout -b "$branch"
+          git commit -am "gamescope $LATEST (the patch applies as is)"
+          git push origin "$branch"
+          gh pr create --title "gamescope $LATEST" --body "The GBM scan-out patch applies to gamescope $LATEST without changes. Build it and look at the picture on an NVIDIA PC before merging."
+
+  rebase:
+    needs: check
+    if: needs.check.outputs.newer == 'yes' && needs.check.outputs.applies == 'no'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            gamescope ${{ needs.check.outputs.latest }} is out and gamescope-gbm-scanout.patch no longer applies to it.
+            Clone https://github.com/ValveSoftware/gamescope.git at that tag, port the patch (keep its intent: GBM-allocated
+            scan-out buffers, opt-in through the gamescope_drm_gbm_scanout convar), and replace gamescope-gbm-scanout.patch with
+            the result. Check that `git apply --check` succeeds on a clean checkout of the tag. Set UPSTREAM_VERSION and the
+            PKGBUILD's pkgver to the new version. Open a pull request that says what changed in the patch. Do not merge it.
+            If upstream already fixed the NVIDIA scan-out corruption, say so in the pull request instead of porting.
