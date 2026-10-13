@@ -16,6 +16,11 @@ Its author noted that part of that work was AI-assisted. gamescope is BSD-2-Clau
 
 It is opt-in: it only takes effect with `gamescope_drm_gbm_scanout=1` in gamescope's environment (Steamify sets it).
 
+## Supported cards
+
+NVIDIA GTX 16 / RTX 20-series or newer (Turing and later). That is what NVIDIA's open kernel driver supports.
+Older cards (GTX 10 series and below) run NVIDIA's closed driver and are not covered.
+
 ## Tested
 
 RTX 5080, driver 615.78.08, gamescope 3.16.31, 3440x1440@175 over DisplayPort: Steam's gaming UI is clean with the patch
