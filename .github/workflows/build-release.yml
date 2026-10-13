@@ -1,6 +1,9 @@
-# Builds the package in CachyOS's own container (so it links against the libraries a CachyOS PC has) and publishes it as a
-# release named <pkgver>-<pkgrel>, with the file's sha256. Steamify downloads it from there; it pins the sha256 itself.
-# Run it by hand (Actions -> build-release -> Run workflow), or push a tag like 3.16.31-1.
+# Builds the package in CachyOS's own container (so it links against the libraries a CachyOS PC has), once per CPU level like
+# CachyOS's own repositories (generic x86-64, x86-64-v3, x86-64-v4, znver4), and publishes them as one release named
+# <pkgver>-<pkgrel> with a sha256 for each file. Steamify downloads the one for the PC's CPU (and falls back to generic).
+# Never build with the container's default -march=native: that is the GitHub machine's CPU, not the user's (a 3.16.31-2 build
+# used AVX-512 FP16 and died with SIGILL on a Ryzen). Each variant is checked for instructions beyond its level.
+# Run it by hand (Actions -> build-release -> Run workflow), or push a tag like 3.16.31-3.
 name: build-release
 
 on:
@@ -16,17 +19,32 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: cachyos/cachyos:latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - variant: generic
+            flags: "-march=x86-64 -mtune=generic"
+            forbid: '\bymm[0-9]+|\bzmm[0-9]+|\{%k[0-7]\}|\bvmovw\b'
+          - variant: v3
+            flags: "-march=x86-64-v3 -mtune=generic"
+            forbid: '\bzmm[0-9]+|\{%k[0-7]\}|\bvmovw\b'
+          - variant: v4
+            flags: "-march=x86-64-v4 -mtune=generic"
+            forbid: '\bvmovw\b|\bv(add|sub|mul|div|min|max|sqrt|cmp|fmadd[0-9]+|fnmadd[0-9]+|fmsub[0-9]+|rcp|rsqrt|scalef|getexp|fpclass)(ph|sh)\b|\btile'
+          - variant: znver4
+            flags: "-march=znver4 -mtune=znver4"
+            forbid: '\bvmovw\b|\bv(add|sub|mul|div|min|max|sqrt|cmp|fmadd[0-9]+|fnmadd[0-9]+|fmsub[0-9]+|rcp|rsqrt|scalef|getexp|fpclass)(ph|sh)\b|\btile'
     steps:
       - name: Tools
         run: |
           pacman-key --init && pacman-key --populate
           pacman -Syu --noconfirm --needed base-devel git sudo
-          # CachyOS's makepkg.conf builds for the CPU it runs on (-march=native): the GitHub machine's CPU is not the user's
-          # (a 3.16.31-2 build used AVX-512 FP16 and died with SIGILL on a Ryzen). Build for any x86-64 PC instead.
-          sed -i -E 's/-march=[^ "]+/-march=x86-64-v2/g; s/-mtune=[^ "]+/-mtune=generic/g' /etc/makepkg.conf
-          grep -n -E '^(C|CXX)FLAGS' /etc/makepkg.conf
           useradd -m builder
           echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+          sed -i -E 's/-march=[^ "]+ ?//g; s/-mtune=[^ "]+ ?//g' /etc/makepkg.conf
+          sed -i -E 's|^(C(XX)?FLAGS=")|\1${{ matrix.flags }} |' /etc/makepkg.conf
+          grep -n -E '^C(XX)?FLAGS' /etc/makepkg.conf
 
       - uses: actions/checkout@v4
 
@@ -37,27 +55,48 @@ jobs:
           runuser -u builder -- bash -c 'cd ~/pkg && makepkg -sf --noconfirm --nocheck'
           cd /home/builder/pkg
           pkg=$(ls steamify-gamescope-nvidia-*.pkg.tar.zst | grep -v -- '-debug-' | head -1)
-          # The package must really contain both patches and start: a build that silently lacks a patch is not published.
+          # The package must really contain both patches, must not use instructions beyond its CPU level, and must start.
           bsdtar -xOf "$pkg" usr/bin/gamescope > /tmp/gamescope-check
           chmod +x /tmp/gamescope-check
           strings -a /tmp/gamescope-check | grep -q drm_gbm_scanout || { echo "the GBM scan-out patch is missing from the binary" >&2; exit 1; }
           strings -a /tmp/gamescope-check | grep -q xwayland_ui_native || { echo "the UI-native patch is missing from the binary" >&2; exit 1; }
-          # Nothing beyond the baseline ISA may be in it (AVX-512 and friends are not on every CPU).
-          if objdump -d /tmp/gamescope-check | grep -m3 -E '\bzmm[0-9]+|\bvmovw\b|\{%k[0-7]\}'; then
-              echo "the binary uses instructions that are not on every x86-64 CPU" >&2; exit 1
+          if objdump -d /tmp/gamescope-check | grep -m3 -E '${{ matrix.forbid }}'; then
+              echo "the ${{ matrix.variant }} binary uses instructions beyond its CPU level" >&2; exit 1
           fi
-          echo "ISA check passed: no AVX-512 in the binary"
+          echo "ISA check passed for ${{ matrix.variant }}"
           /tmp/gamescope-check --version 2>&1 | head -2
-          sha256sum "$pkg" > "$pkg.sha256"
-          cat "$pkg.sha256"
-          tag=${pkg#steamify-gamescope-nvidia-}; tag=${tag%-x86_64.pkg.tar.zst}
-          echo "PKG=$pkg" >> "$GITHUB_ENV"
-          echo "RELTAG=$tag" >> "$GITHUB_ENV"
+          # <package>-<version>-<variant>.pkg.tar.zst (the file name is only a label; pacman reads the package inside)
+          ver=${pkg#steamify-gamescope-nvidia-}; ver=${ver%-x86_64.pkg.tar.zst}
+          out="steamify-gamescope-nvidia-$ver-${{ matrix.variant }}.pkg.tar.zst"
+          mv "$pkg" "$out"
+          sha256sum "$out" > "$out.sha256"
+          cat "$out.sha256"
+          mkdir -p /home/builder/out && cp "$out" "$out.sha256" /home/builder/out/
 
-      - name: Release
-        uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ env.RELTAG }}
-          files: |
-            /home/builder/pkg/${{ env.PKG }}
-            /home/builder/pkg/${{ env.PKG }}.sha256
+          name: pkg-${{ matrix.variant }}
+          path: /home/builder/out/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pkg-*
+          merge-multiple: true
+          path: out
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd out
+          ls -la
+          ver=$(ls steamify-gamescope-nvidia-*-generic.pkg.tar.zst | sed -E 's/steamify-gamescope-nvidia-(.*)-generic\.pkg\.tar\.zst/\1/')
+          [ -n "$ver" ] || { echo "no generic package"; exit 1; }
+          cat *.sha256 > SHA256SUMS
+          gh release create "$ver" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "$ver" --notes "gamescope $ver for NVIDIA PCs, one build per CPU level (generic, v3, v4, znver4). See SHA256SUMS." \
+              steamify-gamescope-nvidia-*.pkg.tar.zst steamify-gamescope-nvidia-*.sha256 SHA256SUMS
