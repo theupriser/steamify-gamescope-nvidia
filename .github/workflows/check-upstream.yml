@@ -57,6 +57,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Require the API key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Without the key the action falls back to OIDC and dies with a misleading "Could not fetch an OIDC token".
+          [[ -n "$ANTHROPIC_API_KEY" ]] || { echo "::error::The patch no longer applies to gamescope ${{ needs.check.outputs.latest }}, and the repository secret ANTHROPIC_API_KEY is not set, so nothing can rebase it. Add the secret (Settings -> Secrets and variables -> Actions) or port the patch by hand."; exit 1; }
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
