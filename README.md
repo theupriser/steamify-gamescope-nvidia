@@ -43,7 +43,7 @@ release in `UPSTREAM_VERSION`: pacman does not update it by itself. Steamify sho
 
 `scripts/check-upstream.sh` finds the newest gamescope release and checks whether the patch still applies.
 `.github/workflows/check-upstream.yml` runs it daily (a draft, not run yet): a clean patch gets a pull request that bumps
-the version; a patch that no longer applies gets a pull request from Claude with a rebased patch. Nothing is merged or
+the version; a patch that no longer applies gets an issue, to be ported by hand or with a local Claude. Nothing is merged or
 released without a person looking at it, and a rebase still needs a look at the picture on an NVIDIA PC.
 
 If upstream fixes the bug, this repository is no longer needed and Steamify goes back to the stock package.
