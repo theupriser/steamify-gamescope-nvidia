@@ -10,7 +10,7 @@
 pkgname=steamify-gamescope-nvidia
 _srcname=gamescope
 pkgver=3.17.0
-pkgrel=2
+pkgrel=1
 pkgdesc='SteamOS session compositing window manager, with GBM scan-out for NVIDIA (opt-in: gamescope_drm_gbm_scanout=1)'
 arch=(x86_64)
 url=https://github.com/theupriser/steamify-gamescope-nvidia
